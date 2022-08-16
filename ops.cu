@@ -65,9 +65,9 @@ torch::Tensor launchWeightedAverageForward(
     dim3 dimBlock(16, 16);
     dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
 
-    static torch::Tensor output = torch::zeros_like(input);
-    static const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
-    static const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
+    torch::Tensor output = torch::zeros_like(input);
+    const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
+    const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
 
     WeightedAverageForward<<<dimGrid, dimBlock>>>(
         width, height,   // image size
@@ -98,7 +98,6 @@ __global__ void WeightedAverageBackward(
         return;
 
     // Iterate the kernel (v: y-axis, u: x-axis)
-    static const float factor = 1.f / 3.f;
     for (int v = -halfKernelWidth; v <= halfKernelWidth; ++v)
     {
         int vy = v + y;
@@ -133,12 +132,12 @@ std::vector<torch::Tensor> launchWeightedAverageBackward(
     dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
 
     // [KxK, H, W]
-    static torch::Tensor gradWeights = torch::zeros(
+    torch::Tensor gradWeights = torch::zeros(
         {weights.size(0) /*kernel*/, height, width}, // Shape
         torch::TensorOptions().device(torch::kCUDA)  // Device
     );
-    static const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
-    static const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
+    const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
+    const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
 
     WeightedAverageBackward<<<dimGrid, dimBlock>>>(
         width, height,   // image size
