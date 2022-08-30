@@ -1,33 +1,35 @@
+#pragma diag_suppress 68, 1388, 1390, 1394, 20013, 20015 // disable nvcc warnings
 #include <torch/extension.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include <stdio.h>
+#include <cstdio>
 
 #define DIV_EPSILON 1e-5f
 
+template <typename scalar_t>
 __global__ void WeightedAverageForward(
     const int width,           //
     const int height,          //
     const int kernelWidth,     //
     const int halfKernelWidth, //
-    const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
-    const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> weights,
-    torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> output)
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> input,
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> weights,
+    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height)
         return;
 
-    // Zero initializations
+    // Zero initialization
     output[0][y][x] = 0;
     output[1][y][x] = 0;
     output[2][y][x] = 0;
 
     // Iterate the kernel (v: y-axis, u: x-axis)
-    float sumW = 0;
+    scalar_t sumW = 0;
     for (int v = -halfKernelWidth; v <= halfKernelWidth; ++v)
     {
         int vy = v + y;
@@ -48,7 +50,7 @@ __global__ void WeightedAverageForward(
             sumW += weights[ind][y][x];
         }
     }
-    float invSumW = 1 / fmaxf(sumW, DIV_EPSILON);
+    scalar_t invSumW = 1 / fmaxf(sumW, DIV_EPSILON);
     output[0][y][x] *= invSumW;
     output[1][y][x] *= invSumW;
     output[2][y][x] *= invSumW;
@@ -69,28 +71,40 @@ torch::Tensor launchWeightedAverageForward(
     const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
     const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
 
-    WeightedAverageForward<<<dimGrid, dimBlock>>>(
-        width, height,   // image size
-        kernelWidth,     // kernel width
-        halfKernelWidth, // half kernel width
-        input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-        weights.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-        output.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
+    // print("(launchWeightedAverage) input.scalar_type: %s\n", torch::toString(input.scalar_type()));
+    // print("(launchWeightedAverage) kernelWidth: %u (half: %u)\n", kernelWidth, halfKernelWidth);
+    // print("(launchWeightedAverage) weights.sizes: (%d, %d, %d)\n", weights.size(0), weights.size(1), weights.size(2));
+    // print("(launchWeightedAverage) output.sizes: (%d, %d, %d)\n", output.size(0), output.size(1), output.size(2));
 
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(),
+        "weighted_average_forward",
+        (
+            [&]
+            {
+                WeightedAverageForward<scalar_t><<<dimGrid, dimBlock>>>(
+                    width, height,   // image size
+                    kernelWidth,     // kernel width
+                    halfKernelWidth, // half kernel width
+                    input.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    weights.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>());
+            }));
     cudaDeviceSynchronize();
 
     return output;
 }
 
+template <typename scalar_t>
 __global__ void WeightedAverageBackward(
     const int width,           //
     const int height,          //
     const int kernelWidth,     //
     const int halfKernelWidth, //
-    const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> input,
-    const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> weights,
-    const torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> gradPrev,
-    torch::PackedTensorAccessor32<float, 3, torch::RestrictPtrTraits> gradWeights)
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> input,
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> weights,
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> gradPrev,
+    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> gradWeights)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -139,14 +153,27 @@ std::vector<torch::Tensor> launchWeightedAverageBackward(
     const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
     const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
 
-    WeightedAverageBackward<<<dimGrid, dimBlock>>>(
-        width, height,   // image size
-        kernelWidth,     // kernel width
-        halfKernelWidth, // half kernel width
-        input.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-        weights.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-        gradPrev.packed_accessor32<float, 3, torch::RestrictPtrTraits>(),
-        gradWeights.packed_accessor32<float, 3, torch::RestrictPtrTraits>());
+    // print("(launchWeightedAverageBackward) input.scalar_type: %s\n", torch::toString(input.scalar_type()));
+    // print("(launchWeightedAverageBackward) kernelWidth: %u (half: %u)\n", kernelWidth, halfKernelWidth);
+    // print("(launchWeightedAverageBackward) gradWeights.sizes: (%d, %d, %d)\n", gradWeights.size(0), gradWeights.size(1), gradWeights.size(2));
+    // print("(launchWeightedAverageBackward) gradPrev.sizes: (%d, %d, %d)\n", gradPrev.size(0), gradPrev.size(1), gradPrev.size(2));
+
+    AT_DISPATCH_FLOATING_TYPES(
+        input.scalar_type(),
+        "weighted_average_backward",
+        (
+            [&]
+            {
+                WeightedAverageBackward<scalar_t><<<dimGrid, dimBlock>>>(
+                    width, height,   // image size
+                    kernelWidth,     // kernel width
+                    halfKernelWidth, // half kernel width
+                    input.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    weights.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    gradPrev.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    gradWeights.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>());
+            }));
+    cudaDeviceSynchronize();
 
     // Return empty grad for input
     return {torch::Tensor(), gradWeights};
