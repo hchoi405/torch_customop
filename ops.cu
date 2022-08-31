@@ -1,4 +1,3 @@
-#pragma diag_suppress 68, 1388, 1390, 1394, 20013, 20015 // disable nvcc warnings
 #include <torch/extension.h>
 
 #include <cuda.h>
@@ -7,6 +6,7 @@
 #include <cstdio>
 
 #define DIV_EPSILON 1e-5f
+#define TensorAccessor torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits>
 
 template <typename scalar_t>
 __global__ void WeightedAverageForward(
@@ -14,9 +14,9 @@ __global__ void WeightedAverageForward(
     const int height,          //
     const int kernelWidth,     //
     const int halfKernelWidth, //
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> input,
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> weights,
-    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
+    const TensorAccessor input,
+    const TensorAccessor weights,
+    TensorAccessor output)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -71,11 +71,6 @@ torch::Tensor launchWeightedAverageForward(
     const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
     const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
 
-    // print("(launchWeightedAverage) input.scalar_type: %s\n", torch::toString(input.scalar_type()));
-    // print("(launchWeightedAverage) kernelWidth: %u (half: %u)\n", kernelWidth, halfKernelWidth);
-    // print("(launchWeightedAverage) weights.sizes: (%d, %d, %d)\n", weights.size(0), weights.size(1), weights.size(2));
-    // print("(launchWeightedAverage) output.sizes: (%d, %d, %d)\n", output.size(0), output.size(1), output.size(2));
-
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
         "weighted_average_forward",
@@ -101,10 +96,10 @@ __global__ void WeightedAverageBackward(
     const int height,          //
     const int kernelWidth,     //
     const int halfKernelWidth, //
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> input,
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> weights,
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> gradPrev,
-    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> gradWeights)
+    const TensorAccessor input,
+    const TensorAccessor weights,
+    const TensorAccessor gradPrev,
+    TensorAccessor gradWeights)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -152,11 +147,6 @@ std::vector<torch::Tensor> launchWeightedAverageBackward(
     );
     const uint32_t kernelWidth = (uint32_t)sqrt((float)weights.size(0));
     const uint32_t halfKernelWidth = (uint32_t)(kernelWidth / 2);
-
-    // print("(launchWeightedAverageBackward) input.scalar_type: %s\n", torch::toString(input.scalar_type()));
-    // print("(launchWeightedAverageBackward) kernelWidth: %u (half: %u)\n", kernelWidth, halfKernelWidth);
-    // print("(launchWeightedAverageBackward) gradWeights.sizes: (%d, %d, %d)\n", gradWeights.size(0), gradWeights.size(1), gradWeights.size(2));
-    // print("(launchWeightedAverageBackward) gradPrev.sizes: (%d, %d, %d)\n", gradPrev.size(0), gradPrev.size(1), gradPrev.size(2));
 
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
